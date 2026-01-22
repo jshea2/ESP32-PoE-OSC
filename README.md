@@ -1,6 +1,6 @@
 # StageMod
 
-Send OSC messages from sensors. 
+Send OSC messages from sensors.. 
 
 Uses Olimex-ESP32-PoE Microcontroller and a web app for updateing configurations
 
