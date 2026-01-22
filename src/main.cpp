@@ -91,6 +91,8 @@ struct SensorConfig {
   bool invert;
   bool activeHigh;
   bool pullup;
+  bool cooldownEnabled;
+  uint32_t cooldownMs;
   String oscAddress;
   String buttonAddress;
   float outMin;
@@ -116,6 +118,9 @@ struct Config {
   String username;
   bool passwordEnabled;
   String password;
+  bool heartbeatEnabled;
+  String heartbeatAddress;
+  uint32_t heartbeatMs;
   SensorConfig sensors[MAX_SENSORS];
 };
 
@@ -131,6 +136,7 @@ int8_t lastEncA[MAX_SENSORS];
 int8_t lastEncB[MAX_SENSORS];
 int8_t lastEncState[MAX_SENSORS];
 int8_t encAccum[MAX_SENSORS];
+uint32_t lastButtonTriggerMs[MAX_SENSORS];
 WiFiUDP udp;
 WebServer server(80);
 Preferences prefs;
@@ -141,6 +147,7 @@ bool wifiApMode = false;
 unsigned long wifiReconnectStarted = 0;
 DNSServer dnsServer;
 unsigned long resetPressStartMs = 0;
+unsigned long lastHeartbeatSentMs = 0;
 
 static String ipToString(const IPAddress& ip);
 static bool parseIpString(const String& s, IPAddress& out);
@@ -345,6 +352,8 @@ static SensorConfig defaultSensorConfig(int index) {
   s.invert = DEFAULT_INVERT;
   s.activeHigh = DEFAULT_DIGITAL_ACTIVE_HIGH;
   s.pullup = DEFAULT_DIGITAL_PULLUP;
+  s.cooldownEnabled = false;
+  s.cooldownMs = 5000;
   s.oscAddress = defaultOscAddress(index);
   s.buttonAddress = "/button";
   s.outMin = DEFAULT_OUT_MIN;
@@ -371,7 +380,9 @@ static void resetRuntimeState() {
     lastEncB[i] = -1;
     lastEncState[i] = -1;
     encAccum[i] = 0;
+    lastButtonTriggerMs[i] = 0;
   }
+  lastHeartbeatSentMs = 0;
 }
 
 static void applySensorPinModes() {
@@ -440,6 +451,11 @@ static void loadConfig() {
   config.wifiPass = prefs.getString("wifi_pass", DEFAULT_WIFI_PASS);
   config.username = prefs.getString("username", DEFAULT_USERNAME);
   if (config.username.length() == 0) config.username = DEFAULT_USERNAME;
+  config.heartbeatEnabled = prefs.getBool("hb_en", false);
+  config.heartbeatAddress = prefs.getString("hb_addr", "/heartbeat");
+  if (config.heartbeatAddress.length() == 0) config.heartbeatAddress = "/heartbeat";
+  config.heartbeatMs = prefs.getUInt("hb_ms", 5000);
+  if (config.heartbeatMs == 0) config.heartbeatMs = 5000;
   config.passwordEnabled = prefs.getBool("pwd_en", false);
   config.password = prefs.getString("pwd", "");
   if (!config.passwordEnabled || config.password.length() == 0) {
@@ -464,6 +480,8 @@ static void loadConfig() {
       s.invert = prefs.getBool(sensorKey(i, "inv").c_str(), s.invert);
       s.activeHigh = prefs.getBool(sensorKey(i, "ah").c_str(), s.activeHigh);
       s.pullup = prefs.getBool(sensorKey(i, "pu").c_str(), s.pullup);
+      s.cooldownEnabled = prefs.getBool(sensorKey(i, "cd_en").c_str(), s.cooldownEnabled);
+      s.cooldownMs = prefs.getUInt(sensorKey(i, "cd_ms").c_str(), s.cooldownMs);
       s.oscAddress = prefs.getString(sensorKey(i, "addr").c_str(), s.oscAddress);
       s.buttonAddress = prefs.getString(sensorKey(i, "baddr").c_str(), s.buttonAddress);
       s.outMin = prefs.getFloat(sensorKey(i, "omin").c_str(), s.outMin);
@@ -513,6 +531,9 @@ static void saveConfig() {
   prefs.putString("wifi_ssid", config.wifiSsid);
   prefs.putString("wifi_pass", config.wifiPass);
   prefs.putString("username", config.username);
+  prefs.putBool("hb_en", config.heartbeatEnabled);
+  prefs.putString("hb_addr", config.heartbeatAddress);
+  prefs.putUInt("hb_ms", config.heartbeatMs);
   prefs.putBool("pwd_en", config.passwordEnabled);
   prefs.putString("pwd", config.password);
 
@@ -527,6 +548,8 @@ static void saveConfig() {
     prefs.putBool(sensorKey(i, "inv").c_str(), s.invert);
     prefs.putBool(sensorKey(i, "ah").c_str(), s.activeHigh);
     prefs.putBool(sensorKey(i, "pu").c_str(), s.pullup);
+    prefs.putBool(sensorKey(i, "cd_en").c_str(), s.cooldownEnabled);
+    prefs.putUInt(sensorKey(i, "cd_ms").c_str(), s.cooldownMs);
     prefs.putString(sensorKey(i, "addr").c_str(), s.oscAddress);
     prefs.putString(sensorKey(i, "baddr").c_str(), s.buttonAddress);
     prefs.putFloat(sensorKey(i, "omin").c_str(), s.outMin);
@@ -800,6 +823,12 @@ static void handleRoot() {
   html += "Output: <input id='test_value' name='test_value' type='text' value='1'><br>";
   html += "<button type='button' id='test_send_btn'>Send</button>";
   html += "</div>";
+  html += "<div class='card'>";
+  html += "<b>Heartbeat</b><br>";
+  html += "Enable: <input name='hb_en' type='checkbox' " + String(config.heartbeatEnabled ? "checked" : "") + "><br>";
+  html += "Address: <input name='hb_addr' type='text' value='" + config.heartbeatAddress + "'><br>";
+  html += "Interval ms: <input name='hb_ms' type='number' value='" + String(config.heartbeatMs) + "'><br>";
+  html += "</div>";
   html += "<hr>";
 
   for (int i = 0; i < MAX_SENSORS; i++) {
@@ -828,7 +857,7 @@ static void handleRoot() {
     html += "</div>";
 
     html += "<div id='s" + idx + "_digital'>";
-    html += "Active high: <input name='s" + idx + "_ah' type='checkbox' " + String(s.activeHigh ? "checked" : "") + "><br>";
+    html += "Active high: <input id='s" + idx + "_ah' name='s" + idx + "_ah' type='checkbox' " + String(s.activeHigh ? "checked" : "") + "><br>";
     html += "Use pullup: <input name='s" + idx + "_pu' type='checkbox' " + String(s.pullup ? "checked" : "") + "><br>";
     html += "</div>";
 
@@ -858,6 +887,11 @@ static void handleRoot() {
     html += "On string: <input name='s" + idx + "_on' type='text' value='" + s.onString + "'><br>";
     html += "Off string: <input name='s" + idx + "_off' type='text' value='" + s.offString + "'><br>";
     html += "</div>";
+    html += "<div id='s" + idx + "_cooldown'>";
+    html += "Cooldown enabled: <input name='s" + idx + "_cd_en' type='checkbox' " + String(s.cooldownEnabled ? "checked" : "") + "><br>";
+    html += "Cooldown ms: <input name='s" + idx + "_cd_ms' type='number' value='" + String(s.cooldownMs) + "'><br>";
+    html += "<small>Cooldown blocks repeat presses and only sends the press message.</small><br>";
+    html += "</div>";
     html += "</fieldset>";
   }
 
@@ -870,12 +904,13 @@ static void handleRoot() {
   html += "<small>Leave new password blank to keep current.</small><br>";
   html += "</div>";
   html += "<hr>";
-  html += "<form method='POST' action='/reset' style='margin-top:8px;'>";
-  html += "<button type='submit' id='factory_reset_btn' class='danger'>Factory Reset</button>";
-  html += "</form>";
+  html += "<div style='margin-top:8px;'>";
+  html += "<button type='button' id='factory_reset_btn' class='danger'>Factory Reset</button>";
+  html += "</div>";
   html += "<script>";
   html += "function updateSensor(i){";
-  html += "const t=document.getElementById('s'+i+'_type').value;";
+  html += "const tSel=document.getElementById('s'+i+'_type');";
+  html += "const t=tSel.value;";
   html += "const om=document.getElementById('s'+i+'_omode');";
   html += "const m=om.value;";
   html += "const a=document.getElementById('s'+i+'_analog');";
@@ -883,13 +918,16 @@ static void handleRoot() {
   html += "const s=document.getElementById('s'+i+'_string');";
   html += "const r=document.getElementById('s'+i+'_range');";
   html += "const opt=document.getElementById('s'+i+'_opt_string');";
+  html += "const ah=document.getElementById('s'+i+'_ah');";
   html += "const addr=document.getElementById('s'+i+'_addr_block');";
   html += "const pin=document.getElementById('s'+i+'_pin_block');";
   html += "const enc=document.getElementById('s'+i+'_encoder');";
   html += "const btnAddrBlock=document.getElementById('s'+i+'_button_addr');";
+  html += "const cd=document.getElementById('s'+i+'_cooldown');";
   html += "const encAddr=document.getElementById('s'+i+'_enc_addr');";
   html += "const btnAddr=document.getElementById('s'+i+'_btn_addr');";
   html += "const isEnc=(t==='4');";
+  html += "const prev=tSel.dataset.prev||t;";
   html += "a.style.display=(t==='0')?'block':'none';";
   html += "d.style.display=(t!=='0'&&!isEnc)?'block':'none';";
   html += "if(t==='0'){";
@@ -904,10 +942,13 @@ static void handleRoot() {
   html += "pin.style.display=isEnc?'none':'block';";
   html += "enc.style.display=isEnc?'block':'none';";
   html += "btnAddrBlock.style.display=isEnc?'block':'none';";
+  html += "cd.style.display=(t==='1'||t==='3')?'block':'none';";
   html += "if(isEnc){";
   html += "if(encAddr&&encAddr.value.trim()===''){encAddr.value='/encoder';}";
   html += "if(btnAddr&&btnAddr.value.trim()===''){btnAddr.value='/button';}";
   html += "}";
+  html += "if(t==='3'&&prev!=='3'&&ah){ah.checked=true;}";
+  html += "tSel.dataset.prev=t;";
   html += "}";
   html += "const dh=document.getElementById('dhcp_enabled');";
   html += "const sf=document.getElementById('static_fields');";
@@ -953,8 +994,10 @@ static void handleRoot() {
   html += "helpBtn.addEventListener('click',()=>{helpModal.style.display='block';});";
   html += "helpClose.addEventListener('click',()=>{helpModal.style.display='none';});";
   html += "helpModal.addEventListener('click',(e)=>{if(e.target===helpModal){helpModal.style.display='none';}});";
-  html += "resetBtn.addEventListener('click',(e)=>{";
-  html += "if(!confirm('Factory reset will erase all settings. Continue?')){e.preventDefault();}});";
+  html += "resetBtn.addEventListener('click',()=>{";
+  html += "if(!confirm('Factory reset will erase all settings. Continue?')){return;}";
+  html += "fetch('/reset',{method:'POST'});";
+  html += "});";
   html += "if(testBtn&&testAddr){testBtn.addEventListener('click',()=>{";
   html += "const data=new URLSearchParams();";
   html += "data.set('test_addr',testAddr.value||'/test');";
@@ -970,7 +1013,9 @@ static void handleRoot() {
   html += "toggleDhcp();";
   html += "toggleNet();";
   html += "for(let i=0;i<" + String(MAX_SENSORS) + ";i++){";
-  html += "document.getElementById('s'+i+'_type').addEventListener('change',()=>updateSensor(i));";
+  html += "const tSel=document.getElementById('s'+i+'_type');";
+  html += "tSel.dataset.prev=tSel.value;";
+  html += "tSel.addEventListener('change',()=>updateSensor(i));";
   html += "document.getElementById('s'+i+'_omode').addEventListener('change',()=>updateSensor(i));";
   html += "updateSensor(i);";
   html += "}";
@@ -1061,6 +1106,15 @@ static void handleSave() {
     }
   }
 
+  config.heartbeatEnabled = server.hasArg("hb_en");
+  if (server.hasArg("hb_addr")) {
+    config.heartbeatAddress = normalizeOscAddress(server.arg("hb_addr"));
+  }
+  if (server.hasArg("hb_ms")) {
+    uint32_t ms = static_cast<uint32_t>(server.arg("hb_ms").toInt());
+    if (ms > 0) config.heartbeatMs = ms;
+  }
+
   for (int i = 0; i < MAX_SENSORS; i++) {
     SensorConfig s = config.sensors[i];
     String idx = String(i);
@@ -1074,13 +1128,13 @@ static void handleSave() {
     if (server.hasArg("s" + idx + "_addr")) {
       s.oscAddress = normalizeOscAddress(server.arg("s" + idx + "_addr"));
     }
-    if (server.hasArg("s" + idx + "_enc_addr")) {
-      s.oscAddress = normalizeOscAddress(server.arg("s" + idx + "_enc_addr"));
-    }
-    if (server.hasArg("s" + idx + "_btn_addr")) {
-      s.buttonAddress = normalizeOscAddress(server.arg("s" + idx + "_btn_addr"));
-    }
     if (s.type == SENSOR_ENCODER) {
+      if (server.hasArg("s" + idx + "_enc_addr")) {
+        s.oscAddress = normalizeOscAddress(server.arg("s" + idx + "_enc_addr"));
+      }
+      if (server.hasArg("s" + idx + "_btn_addr")) {
+        s.buttonAddress = normalizeOscAddress(server.arg("s" + idx + "_btn_addr"));
+      }
       if (s.oscAddress.length() == 0) s.oscAddress = "/encoder";
       if (s.buttonAddress.length() == 0) s.buttonAddress = "/button";
     }
@@ -1088,6 +1142,11 @@ static void handleSave() {
     s.invert = server.hasArg("s" + idx + "_inv");
     s.activeHigh = server.hasArg("s" + idx + "_ah");
     s.pullup = server.hasArg("s" + idx + "_pu");
+    s.cooldownEnabled = server.hasArg("s" + idx + "_cd_en");
+    if (server.hasArg("s" + idx + "_cd_ms")) {
+      uint32_t ms = static_cast<uint32_t>(server.arg("s" + idx + "_cd_ms").toInt());
+      if (ms > 0) s.cooldownMs = ms;
+    }
 
     if (server.hasArg("s" + idx + "_omin")) {
       s.outMin = server.arg("s" + idx + "_omin").toFloat();
@@ -1274,6 +1333,8 @@ void loop() {
     bool active = false;
     bool isEncoder = (s.type == SENSOR_ENCODER);
     const String& outAddress = isEncoder ? s.buttonAddress : s.oscAddress;
+    int8_t prevLevel = lastLevel[i];
+    bool cooldownTriggered = false;
 
     if (isEncoder) {
       int a = digitalRead(s.encClkPin);
@@ -1327,6 +1388,26 @@ void loop() {
         lastLevel[i] = active ? 1 : 0;
         norm = active ? 1.0f : 0.0f;
       }
+    }
+
+    if ((s.type == SENSOR_BUTTON || s.type == SENSOR_DIGITAL) && s.cooldownEnabled) {
+      bool pressed = (norm >= 0.5f);
+      bool rising = pressed && (prevLevel <= 0);
+      if (!rising) {
+        continue;
+      }
+      unsigned long now = millis();
+      if (now - lastButtonTriggerMs[i] < s.cooldownMs) {
+        continue;
+      }
+      lastButtonTriggerMs[i] = now;
+      cooldownTriggered = true;
+    }
+
+    if (cooldownTriggered) {
+      lastBool[i] = -1;
+      lastInt[i] = -1;
+      lastFloat[i] = NAN;
     }
 
     bool changed = false;
@@ -1436,5 +1517,13 @@ void loop() {
 
   if (wifiApMode) {
     dnsServer.processNextRequest();
+  }
+
+  if (config.heartbeatEnabled && config.heartbeatAddress.length() > 0) {
+    unsigned long now = millis();
+    if (now - lastHeartbeatSentMs >= config.heartbeatMs) {
+      lastHeartbeatSentMs = now;
+      sendOscInt(config.heartbeatAddress.c_str(), 1);
+    }
   }
 }

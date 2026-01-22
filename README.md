@@ -19,14 +19,7 @@ https://github.com/user-attachments/assets/ff4cd534-56c4-4b7e-a54d-fffd37521076
 
 ## Setup:
 - Configure all settings
-  - `sensorOSCAddress` and `pingOSCAddress` should change the first number to what device is set. "/?/ping" and "/?/sensor"
-    - This is used for multiple sensors
-  - `remoteIP` and `remotePort` are your computers ip address and what port OSC will be sent.
-  - `triggerOnHigh` if true will send OSC if a `HIGH` is sent via the sensor. Some sensors act opposite
-  - `touchPin` is the data pin the sensor sends data to
-  - `localIP` and `subnet` should configure to be in the same range as your computers network.
 - Flash ESP32-PoE-ISO with file
-- Connect Sensor data pin to whatever `touchPin` is on ESP32-PoE-ISO
 - Connect computer to ESP32-PoE-ISO via PoE network
 - Open [Touchdesigner project]([url](https://github.com/jshea2/conductive_sensor/releases/tag/1.0))
   - It should read "Online" if connected. This knows its online because the ESP32-PoE sends a "/*/ping" to check heartbeat.
