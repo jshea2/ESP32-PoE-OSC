@@ -14,6 +14,7 @@
 #include <Preferences.h>
 #include <WiFiUdp.h>
 #include <WebServer.h>
+#include <LittleFS.h>
 
 // =========================
 // Config (edit these)
@@ -137,6 +138,7 @@ int8_t lastEncB[MAX_SENSORS];
 int8_t lastEncState[MAX_SENSORS];
 int8_t encAccum[MAX_SENSORS];
 uint32_t lastButtonTriggerMs[MAX_SENSORS];
+unsigned long lastAnalogPrintMs[MAX_SENSORS];
 WiFiUDP udp;
 WebServer server(80);
 Preferences prefs;
@@ -148,6 +150,7 @@ unsigned long wifiReconnectStarted = 0;
 DNSServer dnsServer;
 unsigned long resetPressStartMs = 0;
 unsigned long lastHeartbeatSentMs = 0;
+bool littleFsOk = false;
 
 static String ipToString(const IPAddress& ip);
 static bool parseIpString(const String& s, IPAddress& out);
@@ -191,6 +194,13 @@ static float clampFloat(float v, float minV, float maxV) {
 
 static float readAnalogNormalized(int index, const SensorConfig& sensor) {
   int raw = readAveragedADC(sensor.pin);                 // 0..4095
+  if (millis() - lastAnalogPrintMs[index] >= 500) {
+    lastAnalogPrintMs[index] = millis();
+    Serial.print("ADC GPIO");
+    Serial.print(sensor.pin);
+    Serial.print(" raw: ");
+    Serial.println(raw);
+  }
   if (ema[index] < 0) ema[index] = raw;
   ema[index] = ALPHA * raw + (1.0f - ALPHA) * ema[index];
   float norm = ema[index] / 4095.0f;
@@ -206,6 +216,8 @@ static bool readDigitalActive(const SensorConfig& sensor) {
 }
 
 static float mapOutput(const SensorConfig& sensor, float norm) {
+  if (norm <= 0.015f) return sensor.outMin;
+  if (norm >= 0.985f) return sensor.outMax;
   float out = sensor.outMin + norm * (sensor.outMax - sensor.outMin);
   if (sensor.outMin < sensor.outMax) {
     return clampFloat(out, sensor.outMin, sensor.outMax);
@@ -381,6 +393,7 @@ static void resetRuntimeState() {
     lastEncState[i] = -1;
     encAccum[i] = 0;
     lastButtonTriggerMs[i] = 0;
+    lastAnalogPrintMs[i] = 0;
   }
   lastHeartbeatSentMs = 0;
 }
@@ -760,6 +773,7 @@ static void handleRoot() {
   html += "<p><b>Boot-strap pins:</b> GPIO0, GPIO2, GPIO12, GPIO15 (avoid pulling these during boot).</p>";
   html += "<p><b>USB serial:</b> GPIO1/GPIO3 used for programming.</p>";
   html += "<p><b>Reserved:</b> GPIO34 used for factory reset button (BUT1).</p>";
+  html += "<img src='/pinout.png' alt='ESP32-POE pinout' style='width:100%;height:auto;margin-top:8px;border-radius:8px;border:1px solid #ddd;'>";
   html += "<button type='button' id='pin_help_close'>Close</button>";
   html += "</div></div>";
   if (wifiApMode) {
@@ -771,6 +785,7 @@ static void handleRoot() {
   html += "<div>IP: " + getLocalIp().toString() + "</div>";
   html += "<div>mDNS: http://" + config.hostname + ".local/</div>";
   html += "</div>";
+  html += "<small>Multiple devices on the same network will connect as http://stagemod-x.local</small>";
 
   bool anyConflict = false;
   for (int i = 0; i < MAX_SENSORS; i++) {
@@ -849,7 +864,7 @@ static void handleRoot() {
     html += "<small>Analog pins allowed: 32,35,36. Reserved pins: 0,1,2,3,4,12,14,15,34</small><br>";
     html += "</div>";
     html += "<div id='s" + idx + "_addr_block'>";
-    html += "OSC address: <input name='s" + idx + "_addr' type='text' value='" + s.oscAddress + "'><br>";
+    html += "OSC address: <input id='s" + idx + "_addr' name='s" + idx + "_addr' type='text' value='" + s.oscAddress + "'><br>";
     html += "</div>";
 
     html += "<div id='s" + idx + "_analog'>";
@@ -920,6 +935,7 @@ static void handleRoot() {
   html += "const opt=document.getElementById('s'+i+'_opt_string');";
   html += "const ah=document.getElementById('s'+i+'_ah');";
   html += "const addr=document.getElementById('s'+i+'_addr_block');";
+  html += "const addrInput=document.getElementById('s'+i+'_addr');";
   html += "const pin=document.getElementById('s'+i+'_pin_block');";
   html += "const enc=document.getElementById('s'+i+'_encoder');";
   html += "const btnAddrBlock=document.getElementById('s'+i+'_button_addr');";
@@ -942,6 +958,9 @@ static void handleRoot() {
   html += "pin.style.display=isEnc?'none':'block';";
   html += "enc.style.display=isEnc?'block':'none';";
   html += "btnAddrBlock.style.display=isEnc?'block':'none';";
+  html += "if(addrInput){addrInput.disabled=isEnc;}";
+  html += "if(encAddr){encAddr.disabled=!isEnc;}";
+  html += "if(btnAddr){btnAddr.disabled=!isEnc;}";
   html += "cd.style.display=(t==='1'||t==='3')?'block':'none';";
   html += "if(isEnc){";
   html += "if(encAddr&&encAddr.value.trim()===''){encAddr.value='/encoder';}";
@@ -1281,11 +1300,29 @@ void setup() {
     startWifiAp();
   }
 
+  littleFsOk = LittleFS.begin();
+  if (!littleFsOk) {
+    Serial.println("LittleFS mount failed.");
+  }
+
   server.on("/", HTTP_GET, handleRoot);
   server.on("/", HTTP_POST, handleSave);
   server.on("/save", HTTP_POST, handleSave);
   server.on("/send_test", HTTP_POST, handleSendTestOsc);
   server.on("/reset", HTTP_POST, handleReset);
+  server.on("/pinout.png", HTTP_GET, []() {
+    if (!littleFsOk) {
+      server.send(404, "text/plain", "Not found");
+      return;
+    }
+    File file = LittleFS.open("/pinout.png", "r");
+    if (!file) {
+      server.send(404, "text/plain", "Not found");
+      return;
+    }
+    server.streamFile(file, "image/png");
+    file.close();
+  });
 #if !USE_ETHERNET
   server.on("/generate_204", HTTP_GET, []() {
     server.sendHeader("Location", "/", true);
