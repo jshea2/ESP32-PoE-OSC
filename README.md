@@ -1,64 +1,64 @@
 # StageMod
 
-Send OSC messages from sensors.. 
+StageMod turns an Olimex ESP32-PoE-ISO into a configurable OSC sensor hub with a built-in web UI.
 
-Uses Olimex-ESP32-PoE Microcontroller and a web app for updateing configurations
+Quick links
+- Web flasher: https://jshea2.github.io/StageMod/web-flasher/
+- TouchDesigner project: `Touchdesigner/StageMod-TouchSensorOSC.toe`
+- 3D prints: `3D_Prints/StageMod-v1.stl` (print) and `3D_Prints/StageMod-v1.f3d` (edit)
 
-Use ESP32-PoE with sensor to send OSC filtered by Touchdesigner.
+## Hardware
+- Olimex ESP32-PoE-ISO
+- PoE switch or injector (or USB for power + data)
+- Sensors (digital or analog; up to 6 total)
+- Jumper wires / breadboard as needed
 
+## Flash firmware (no IDE)
+1) Open the web flasher: https://jshea2.github.io/StageMod/web-flasher/
+2) Plug in the ESP32-PoE-ISO over USB and click **Connect**
+3) If it does not show up, hold **BOOT** while plugging in
+4) When prompted, allow **Erase device** and install
 
-https://github.com/user-attachments/assets/ff4cd534-56c4-4b7e-a54d-fffd37521076
+## Configure the device
+StageMod uses a web UI for setup. You can access it over Ethernet or WiFi.
 
+Network behavior
+- If Ethernet is connected, it uses DHCP by default.
+- If no Ethernet is present, it starts a WiFi AP and shows a configuration page.
 
+Open the UI
+- Default: http://stagemod.local
+- Or use the device IP shown by your router
+- You can change the hostname later and use that URL instead
 
-## Hardware Requirements:
-- [ESP32-PoE-ISO](https://www.digikey.com/en/products/detail/olimex-ltd/ESP32-POE-ISO/10258716)
-- [Sensor Example](https://www.amazon.com/HiLetgo-TTP223B-Capacitive-Digital-Raspberry/dp/B00HFQEFWQ/ref=sr_1_1_sspa)
-- [PoE Switch or Injector](https://www.amazon.com/Injector-Compliant-Compatible-TL-POE150S-TPE-113GI/dp/B09BFBM6PQ/ref=sr_1_9)
-- [Breadboard Jumper Wire](https://www.amazon.com/Elegoo-EL-CP-004-Multicolored-Breadboard-arduino/dp/B01EV70C78/)
+## OSC behavior
+Set the target OSC client and behavior in the web UI:
+- Client IP and port
+- Test OSC button sends a one-shot pulse to your configured address
+- Heartbeat sends a repeating OSC message at a custom interval
+- Up to 6 sensors, each with its own type and OSC address
+- Buttons and digital sensors can enable a cooldown to prevent rapid re-triggers
+- Optional username/password security
 
-## Setup:
+Factory reset
+- Hold the onboard button for 5 seconds to restore defaults
 
-### Option A: Prebuilt firmware (recommended)
-- Download the latest firmware `.bin` from the GitHub Releases for this repo
-- Or flash directly from the browser (Chrome/Edge) using the web flasher page (see below)
-- Flash it to the ESP32-PoE-ISO with one of these methods:
-  - **esptool (CLI):**
-    - `esptool.py --chip esp32 --port /dev/tty.usbserial-XXXX write_flash -z 0x10000 firmware.bin`
-  - **PlatformIO:** use "Upload" in the PlatformIO toolbar and select the `.bin` file
+## TouchDesigner
+Use the included TouchDesigner file to monitor and test OSC:
+- `Touchdesigner/StageMod-TouchSensorOSC.toe`
+- Easy UI for configuring and monitoring OSC In/Out
+- Shows online/offline using a heartbeat OSC message (`/heartbeat`)
 
-### Option B: Build from source
-- Clone this repo
-- Open in PlatformIO and select the `esp32-poe` environment
-- Build and upload:
-  - `pio run -e esp32-poe -t upload`
+## 3D prints
+Files are in `3D_Prints/`:
+- `StageMod-v1.stl` for printing
+- `StageMod-v1.f3d` for editing in Fusion 360
 
-### Browser flashing (no IDE)
-- Open the GitHub Pages web flasher: `https://jshea2.github.io/StageMod/web-flasher/`
-- Connect the Olimex ESP32-PoE-ISO via USB and click **Connect**
-- If the device doesn’t appear, hold **BOOT** while plugging in
+## Build from source (PlatformIO)
+1) Clone the repo
+2) Open in PlatformIO and select the `esp32-poe` environment
+3) Build and upload:
+   - `pio run -e esp32-poe -t upload`
 
----
-
-<img width="400" height="690" alt="Screenshot 2026-01-26 at 8 51 30 PM" src="https://github.com/user-attachments/assets/e934f9db-e3cc-465f-af28-504c3eafb878" />
-
-
-- Configure all settings
-
-- Connect computer to ESP32-PoE-ISO via PoE network
-- Open [Touchdesigner project]([url](https://github.com/jshea2/conductive_sensor/releases/tag/1.0))
-  - It should read "Online" if connected. This knows its online because the ESP32-PoE sends a "/*/ping" to check heartbeat.
-
-Features:
-- Touchdesigner UI
-- Online / Offline indicator
-- Feild for amount of time for cooldown state. This is incase the sensor is triggered too quickly. 
-- It also shows an indicator everytime it is touched
-- "Test" button is included to test trigger without ESP32-PoE online
-- Feilds to edit ping and sensor trigger OSC address
-- OSC Out Client configure
-  - IP, Port, OSC Address & Argument
-
-## Credits:
-
-Original project is by [Facing Tomorrow](https://github.com/facingtomorrow). This repository added OSC support and other TD UI components.
+## Credits
+Original project by [Facing Tomorrow](https://github.com/facingtomorrow). This repo adds OSC support and TouchDesigner UI components.
