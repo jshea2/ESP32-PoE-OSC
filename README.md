@@ -19,7 +19,26 @@ https://github.com/user-attachments/assets/ff4cd534-56c4-4b7e-a54d-fffd37521076
 
 ## Setup:
 
-- Download repo and flash ESP32-PoE-ISO with file
+### Option A: Prebuilt firmware (recommended)
+- Download the latest firmware `.bin` from the GitHub Releases for this repo
+- Or flash directly from the browser (Chrome/Edge) using the web flasher page (see below)
+- Flash it to the ESP32-PoE-ISO with one of these methods:
+  - **esptool (CLI):**
+    - `esptool.py --chip esp32 --port /dev/tty.usbserial-XXXX write_flash -z 0x10000 firmware.bin`
+  - **PlatformIO:** use "Upload" in the PlatformIO toolbar and select the `.bin` file
+
+### Option B: Build from source
+- Clone this repo
+- Open in PlatformIO and select the `esp32-poe` environment
+- Build and upload:
+  - `pio run -e esp32-poe -t upload`
+
+### Browser flashing (no IDE)
+- Open the GitHub Pages web flasher: `https://jshea2.github.io/StageMod/web-flasher/`
+- Connect the Olimex ESP32-PoE-ISO via USB and click **Connect**
+- If the device doesn’t appear, hold **BOOT** while plugging in
+
+---
 
 <img width="400" height="690" alt="Screenshot 2026-01-26 at 8 51 30 PM" src="https://github.com/user-attachments/assets/e934f9db-e3cc-465f-af28-504c3eafb878" />
 

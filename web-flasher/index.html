@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>StageMod Web Flasher</title>
+    <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js"></script>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: "Avenir Next", Avenir, "Helvetica Neue", Helvetica, Arial, sans-serif;
+      }
+      body {
+        margin: 0;
+        padding: 40px 20px;
+        background: #f6f4f0;
+        color: #1f1f1f;
+      }
+      .card {
+        max-width: 640px;
+        margin: 0 auto;
+        padding: 24px;
+        border-radius: 16px;
+        background: #ffffff;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+      }
+      h1 {
+        margin: 0 0 8px 0;
+        font-size: 28px;
+      }
+      p {
+        margin: 0 0 16px 0;
+        line-height: 1.5;
+      }
+      .note {
+        font-size: 14px;
+        color: #4a4a4a;
+      }
+      .actions {
+        margin-top: 16px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>StageMod Web Flasher</h1>
+      <p>Connect your Olimex ESP32-PoE-ISO via USB and flash the latest firmware.</p>
+      <div class="actions">
+        <esp-web-install-button manifest="manifest.json"></esp-web-install-button>
+      </div>
+      <p class="note">
+        Works in Chrome or Edge (Web Serial required). You may need to press the BOOT button if the device doesn’t appear.
+      </p>
+    </div>
+  </body>
+</html>
